@@ -65,9 +65,6 @@ bool startJump(GameState& st, Position cell) {
         st.arbiter.startJump(cell, st.elapsedMs);
         return true;
     } catch (const RealTimeArbiterError&) {
-        // Rejected - same treatment as any other illegal/blocked move
-        // attempt elsewhere in this codebase: no exception escapes
-        // GameEngine, caller learns via the bool return instead.
         return false;
     }
 }
@@ -77,8 +74,14 @@ void handleWait(GameState& st, long ms) {
     std::vector<ArrivalEvent> events = st.arbiter.advanceTime(st.elapsedMs, st.board);
     for (const ArrivalEvent& event : events) {
         if (event.move) st.moveHistory.push_back(*event.move);
-        if (event.capturedPiece && event.capturedPiece->kind == Kind::King) {
-            st.gameOver = true;
+        if (event.capturedPiece) {
+            Color capturedColor = event.capturedPiece->color;
+            Color capturingColor = (capturedColor == Color::White) ? Color::Black : Color::White;
+            st.score.add(capturingColor, config::pointValueFor(event.capturedPiece->kind));
+
+            if (event.capturedPiece->kind == Kind::King) {
+                st.gameOver = true;
+            }
         }
     }
 }

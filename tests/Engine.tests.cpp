@@ -793,6 +793,106 @@ TEST_CASE("handleWait appends multiple independent MoveRecords in arrival order"
     CHECK(st.moveHistory[1].kind == Kind::Rook);      // due at 500ms, settles second
 }
 
+TEST_CASE("a fresh GameState starts with zero score for both sides") {
+    GameState st = makeState({"wR . . ."});
+    CHECK(st.score.white == 0);
+    CHECK(st.score.black == 0);
+}
+
+TEST_CASE("handleWait credits the capturing side's score with the captured piece's point value") {
+    GameState st = makeState({"wR . . bN"});   // Knight = 3 points
+    PieceMove m; m.from = {0, 0}; m.to = {0, 3};
+    m.startMs = 0; m.durationMs = 100; m.piece = "wR";
+    st.arbiter.startMotion(m);
+
+    handleWait(st, 150);
+
+    CHECK(st.score.white == 3);
+    CHECK(st.score.black == 0);
+}
+
+TEST_CASE("handleWait does not change score when an arrival is not a capture") {
+    GameState st = makeState({"wR . . ."});
+    PieceMove m; m.from = {0, 0}; m.to = {0, 3};
+    m.startMs = 0; m.durationMs = 100; m.piece = "wR";
+    st.arbiter.startMotion(m);
+
+    handleWait(st, 150);
+
+    CHECK(st.score.white == 0);
+    CHECK(st.score.black == 0);
+}
+
+TEST_CASE("handleWait does not change score for a friendly-blocked arrival") {
+    GameState st = makeState({"wR . . wP"});
+    PieceMove m; m.from = {0, 0}; m.to = {0, 3};
+    m.startMs = 0; m.durationMs = 100; m.piece = "wR";
+    st.arbiter.startMotion(m);
+
+    handleWait(st, 150);
+
+    CHECK(st.score.white == 0);
+    CHECK(st.score.black == 0);
+}
+
+TEST_CASE("handleWait credits black's score when black captures a white piece") {
+    GameState st = makeState({"bQ . . wR"});   // Rook = 5 points
+    PieceMove m; m.from = {0, 0}; m.to = {0, 3};
+    m.startMs = 0; m.durationMs = 100; m.piece = "bQ";
+    st.arbiter.startMotion(m);
+
+    handleWait(st, 150);
+
+    CHECK(st.score.black == 5);   // captured piece's (Rook's) value counts, not the capturing Queen's
+    CHECK(st.score.white == 0);
+}
+
+TEST_CASE("handleWait credits the jumper's side when a jump interception destroys the arriving piece") {
+    // The jumper (white) survives; the arriving black knight is destroyed
+    // mid-flight - the interception is a capture credited to white, exactly
+    // like an ordinary capture, via the same event.capturedPiece field.
+    GameState st = makeState({"wR . bN"});
+    st.arbiter.startJump({0, 0}, 0);
+
+    PieceMove m; m.from = {0, 2}; m.to = {0, 0}; m.startMs = 0; m.durationMs = 999; m.piece = "bN";
+    st.arbiter.startMotion(m);
+
+    handleWait(st, 999);
+
+    CHECK(st.score.white == 3);   // Knight = 3 points
+    CHECK(st.score.black == 0);
+}
+
+TEST_CASE("handleWait accumulates score across multiple independent captures") {
+    GameState st = makeState({"wR . . bP", ". bB . .", ". . . .", "wN . . ."});
+
+    PieceMove rookMove; rookMove.from = {0, 0}; rookMove.to = {0, 3};   // captures bP (1 point)
+    rookMove.startMs = 0; rookMove.durationMs = 500; rookMove.piece = "wR";
+    st.arbiter.startMotion(rookMove);
+
+    PieceMove knightMove; knightMove.from = {3, 0}; knightMove.to = {1, 1};   // captures bB (3 points)
+    knightMove.startMs = 0; knightMove.durationMs = 300; knightMove.piece = "wN";
+    st.arbiter.startMotion(knightMove);
+
+    handleWait(st, 500);
+
+    CHECK(st.score.white == 4);   // 1 + 3, accumulated across two concurrent captures
+    CHECK(st.score.black == 0);
+}
+
+TEST_CASE("handleWait awards zero points for a captured King even though it ends the game") {
+    GameState st = makeState({"wR . . bK"});
+    PieceMove m; m.from = {0, 0}; m.to = {0, 3};
+    m.startMs = 0; m.durationMs = 100; m.piece = "wR";
+    st.arbiter.startMotion(m);
+
+    handleWait(st, 150);
+
+    CHECK(st.gameOver);
+    CHECK(st.score.white == 0);   // King = 0 points by design
+    CHECK(st.score.black == 0);
+}
+
 TEST_CASE("runCommands executes click, wait and print in sequence") {
     GameState st = makeState({"wR . . .", ". . . .", ". . . .", ". . . ."});
 

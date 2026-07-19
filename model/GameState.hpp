@@ -6,6 +6,7 @@
 #include "Position.hpp"
 #include "PieceMove.hpp"
 #include "MoveRecord.hpp"
+#include "Score.hpp"
 #include "../realtime/RealTimeArbiter.hpp"
 
 struct Selection {
@@ -24,4 +25,5 @@ struct GameState {
     bool            gameOver = false;
 
     std::vector<MoveRecord> moveHistory;
+    Score                   score;
 };

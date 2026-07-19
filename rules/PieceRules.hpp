@@ -21,6 +21,9 @@ namespace config {
 
     PieceStats statsFor(Kind kind);
 
+
+    int pointValueFor(Kind kind);
+
     using MoveShapeFn = std::function<bool(int dRow, int dCol, char color)>;
 
     bool kingShape(int dRow, int dCol, char color);

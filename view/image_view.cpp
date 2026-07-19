@@ -33,9 +33,11 @@ constexpr double REST_OVERLAY_MAX_ALPHA = 0.55;
 const cv::Scalar HISTORY_BG_COLOR(40, 40, 40);
 const cv::Scalar HISTORY_TEXT_COLOR(225, 225, 225);
 const cv::Scalar HISTORY_HEADER_COLOR(0, 215, 255);
+const cv::Scalar HISTORY_SCORE_COLOR(120, 255, 120);
 
 constexpr int HISTORY_HEADER_Y = 30;
-constexpr int HISTORY_FIRST_ROW_Y = 60;
+constexpr int HISTORY_SCORE_Y = 54;
+constexpr int HISTORY_FIRST_ROW_Y = 84;
 constexpr int HISTORY_ROW_HEIGHT = 24;
 constexpr double HISTORY_ROW_FONT_SCALE = 0.5;
 
@@ -127,14 +129,18 @@ std::string moveHistoryLine(int moveNumber, const MoveRecord& rec, int boardRows
     return out.str();
 }
 
-// Draws one move-history panel
+
 void drawHistoryPanel(cv::Mat& image, int panelX, int panelWidth, int panelHeight,
-                       const std::string& title, const std::vector<MoveRecord>& moves, int boardRows) {
+                       const std::string& title, int score,
+                       const std::vector<MoveRecord>& moves, int boardRows) {
     cv::Rect panelRect(panelX, 0, panelWidth, panelHeight);
     image(panelRect) = HISTORY_BG_COLOR;
 
     cv::putText(image, title, cv::Point(panelX + 10, HISTORY_HEADER_Y),
                 cv::FONT_HERSHEY_SIMPLEX, 0.6, HISTORY_HEADER_COLOR, 2, cv::LINE_AA);
+
+    cv::putText(image, "Score: " + std::to_string(score), cv::Point(panelX + 10, HISTORY_SCORE_Y),
+                cv::FONT_HERSHEY_SIMPLEX, 0.55, HISTORY_SCORE_COLOR, 1, cv::LINE_AA);
 
     int maxRows = std::max(0, (panelHeight - HISTORY_FIRST_ROW_Y) / HISTORY_ROW_HEIGHT);
     int total = static_cast<int>(moves.size());
@@ -316,8 +322,10 @@ cv::Mat renderBoard(const GameState& state) {
     for (const MoveRecord& rec : state.moveHistory) {
         (rec.color == Color::White ? whiteMoves : blackMoves).push_back(rec);
     }
-    drawHistoryPanel(image, 0, config::HISTORY_PANEL_WIDTH, boardHeight, "Black (Player B)", blackMoves, rows);
-    drawHistoryPanel(image, boardX + boardWidth, config::HISTORY_PANEL_WIDTH, boardHeight, "White (Player A)", whiteMoves, rows);
+    drawHistoryPanel(image, 0, config::HISTORY_PANEL_WIDTH, boardHeight,
+                      "Black (Player B)", state.score.black, blackMoves, rows);
+    drawHistoryPanel(image, boardX + boardWidth, config::HISTORY_PANEL_WIDTH, boardHeight,
+                      "White (Player A)", state.score.white, whiteMoves, rows);
 
     return image;
 }

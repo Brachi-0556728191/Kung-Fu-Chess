@@ -34,6 +34,18 @@ namespace config {
         }
     }
 
+    int pointValueFor(Kind kind) {
+        switch (kind) {
+            case Kind::Pawn:   return 1;
+            case Kind::Knight: return 3;
+            case Kind::Bishop: return 3;
+            case Kind::Rook:   return 5;
+            case Kind::Queen:  return 9;
+            case Kind::King:   return 0;
+        }
+        throw PieceError("INVALID_PIECE_TOKEN");
+    }
+
     bool kingShape(int dRow, int dCol, char /*color*/) {
         return (dRow != 0 || dCol != 0) && std::abs(dRow) <= 1 && std::abs(dCol) <= 1;
     }
