@@ -9,6 +9,9 @@
 namespace Controller {
 
     void click(GameState& st, int x, int y) {
+        
+        if (st.gameOver) return;
+
         auto cell = pixelToCell(x, y, st.board);
         if (!cell) {
             if (st.selection.active) st.selection = Selection{};

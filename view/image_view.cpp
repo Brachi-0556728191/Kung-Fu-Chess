@@ -13,6 +13,7 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include "../model/GameOverState.hpp"
 #include "../model/MoveRecord.hpp"
 #include "../rules/RuleEngine.hpp"
 #include "../rules/config.hpp"
@@ -50,6 +51,14 @@ constexpr double HISTORY_ROW_FONT_SCALE = 0.5;
 
 const cv::Scalar COORDINATE_LABEL_COLOR(40, 40, 40);
 constexpr double COORDINATE_LABEL_FONT_SCALE = 0.4;
+
+// Whole-canvas dim + centered title/subtitle for the game-over overlay.
+// Same cv::addWeighted dim-then-draw technique used throughout this file,
+// just applied to the entire frame instead of a single cell.
+const cv::Scalar GAME_OVER_DIM_COLOR(0, 0, 0);
+constexpr double GAME_OVER_DIM_ALPHA = 0.55;
+const cv::Scalar GAME_OVER_TITLE_COLOR(255, 255, 255);
+const cv::Scalar GAME_OVER_SUBTITLE_COLOR(0, 215, 255);
 
 
 cv::Mat addAlphaFromBackground(const cv::Mat& bgr) {
@@ -186,6 +195,25 @@ void drawFileLabel(cv::Mat& image, int boardX, int col, int boardRows) {
                 cv::FONT_HERSHEY_SIMPLEX, COORDINATE_LABEL_FONT_SCALE, COORDINATE_LABEL_COLOR, 1, cv::LINE_AA);
 }
 
+
+void drawGameOverOverlay(cv::Mat& image, const GameOverState& gameOver) {
+    cv::Mat dim(image.size(), image.type(), GAME_OVER_DIM_COLOR);
+    cv::addWeighted(dim, GAME_OVER_DIM_ALPHA, image, 1.0 - GAME_OVER_DIM_ALPHA, 0.0, image);
+
+    const std::string title = "GAME OVER";
+    const std::string subtitle = (gameOver.winner == Color::White ? "White" : "Black") + std::string(" wins!");
+
+    int baseline = 0;
+    const double titleScale = 1.4;
+    cv::Size titleSize = cv::getTextSize(title, cv::FONT_HERSHEY_SIMPLEX, titleScale, 3, &baseline);
+    cv::Point titlePos((image.cols - titleSize.width) / 2, image.rows / 2 - 10);
+    cv::putText(image, title, titlePos, cv::FONT_HERSHEY_SIMPLEX, titleScale, GAME_OVER_TITLE_COLOR, 3, cv::LINE_AA);
+
+    const double subScale = 0.8;
+    cv::Size subSize = cv::getTextSize(subtitle, cv::FONT_HERSHEY_SIMPLEX, subScale, 2, &baseline);
+    cv::Point subPos((image.cols - subSize.width) / 2, image.rows / 2 + 30);
+    cv::putText(image, subtitle, subPos, cv::FONT_HERSHEY_SIMPLEX, subScale, GAME_OVER_SUBTITLE_COLOR, 2, cv::LINE_AA);
+}
 
 cv::Mat loadBoardBackground(int width, int height) {
     static std::map<std::string, cv::Mat> cache;
@@ -350,6 +378,13 @@ cv::Mat renderBoard(const GameState& state) {
                       "Black (Player B)", state.score.black, blackMoves, rows);
     drawHistoryPanel(image, boardX + boardWidth, config::HISTORY_PANEL_WIDTH, boardHeight,
                       "White (Player A)", state.score.white, whiteMoves, rows);
+
+    // Drawn absolutely last so it sits on top of the board, pieces,
+    // highlights, and both panels - once this shows, nothing else in the
+    // frame should still read as interactive.
+    if (state.gameOver) {
+        drawGameOverOverlay(image, state.gameOver);
+    }
 
     return image;
 }

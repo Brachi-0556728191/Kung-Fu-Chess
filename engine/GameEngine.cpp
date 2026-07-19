@@ -80,7 +80,8 @@ void handleWait(GameState& st, long ms) {
             st.score.add(capturingColor, config::pointValueFor(event.capturedPiece->kind));
 
             if (event.capturedPiece->kind == Kind::King) {
-                st.gameOver = true;
+                st.gameOver = GameOverState{true, capturingColor, GameOverReason::KingCaptured};
+                st.selection.clear();
             }
         }
     }

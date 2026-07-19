@@ -7,6 +7,7 @@
 #include "PieceMove.hpp"
 #include "MoveRecord.hpp"
 #include "Score.hpp"
+#include "GameOverState.hpp"
 #include "../realtime/RealTimeArbiter.hpp"
 
 struct Selection {
@@ -21,8 +22,8 @@ struct GameState {
     Board           board;
     long            elapsedMs = 0;
     Selection       selection;
-    RealTimeArbiter arbiter;   
-    bool            gameOver = false;
+    RealTimeArbiter arbiter;
+    GameOverState   gameOver;
 
     std::vector<MoveRecord> moveHistory;
     Score                   score;

@@ -506,6 +506,59 @@ TEST_CASE("handleWait sets gameOver true when a king is captured on arrival") {
     CHECK(tokenAt(st.board, {0, 3}) == "wR");
 }
 
+TEST_CASE("handleWait records the capturing side as the winner when a king is captured") {
+    GameState st = makeState({"wR . . bK", ". . . .", ". . . .", ". . . ."});
+    st.selection = {true, {0, 0}, 0};
+    sendMove(st, 0, 3); // white rook captures the black king
+
+    handleWait(st, 3000);
+
+    REQUIRE(st.gameOver);
+    CHECK(st.gameOver.winner == Color::White);
+    CHECK(st.gameOver.reason == GameOverReason::KingCaptured);
+}
+
+TEST_CASE("handleWait records black as the winner when black captures the white king") {
+    GameState st = makeState({"bR . . wK", ". . . .", ". . . .", ". . . ."});
+    st.selection = {true, {0, 0}, 0};
+    sendMove(st, 0, 3); // black rook captures the white king
+
+    handleWait(st, 3000);
+
+    REQUIRE(st.gameOver);
+    CHECK(st.gameOver.winner == Color::Black);
+}
+
+TEST_CASE("handleWait records the jumper's side as the winner when a jump interception destroys the enemy king") {
+    GameState st = makeState({"wR bK .", ". . .", ". . ."});
+    startJump(st, {0, 0});    // wR jumps in place
+
+    st.selection = {true, {0, 1}, 0};
+    sendMove(st, 0, 0);       // bK attempts to move onto wR's cell
+
+    handleWait(st, 1000);     // the king's move and the jump's window elapse at the same tick
+
+    REQUIRE(st.gameOver);
+    CHECK(st.gameOver.winner == Color::White);   // the jumper's side, not the destroyed king's
+}
+
+TEST_CASE("a selection active when the game ends is cleared, so no stale highlight lingers") {
+    GameState st = makeState({"wR . . bK", ". . . .", ". . . .", ". . . ."});
+    st.selection = {true, {0, 0}, 0};
+    sendMove(st, 0, 3); // rook captures the black king
+    REQUIRE(st.selection.active == false);   // sendMove already clears it on send
+
+    // Re-open a selection mid-flight, before the capturing move has landed,
+    // to prove handleWait itself clears it once the game actually ends -
+    // not merely as a side effect of sendMove having run earlier.
+    st.selection = {true, {1, 1}, st.elapsedMs};
+
+    handleWait(st, 3000);
+
+    REQUIRE(st.gameOver);
+    CHECK_FALSE(st.selection.active);
+}
+
 TEST_CASE("sendMove after game over leaves the board completely unchanged") {
     GameState st = makeState({"wR . . bK", ". . . wN", ". . . .", ". . . ."});
     st.selection = {true, {0, 0}, 0};
@@ -705,6 +758,36 @@ TEST_CASE("handleClick on an empty cell with no pending selection is a no-op") {
     GameState st = makeState({". . .", ". . .", ". . ."});
     Controller::click(st, boardPx(5), 5);
     CHECK_FALSE(st.selection.active);
+}
+
+TEST_CASE("handleClick refuses to open a new selection once the game is over") {
+    GameState st = makeState({"wR . . bK", ". . . .", ". . . .", ". . . ."});
+    st.selection = {true, {0, 0}, 0};
+    sendMove(st, 0, 3);
+    handleWait(st, 3000);
+    REQUIRE(st.gameOver);
+    REQUIRE(tokenAt(st.board, {0, 3}) == "wR");
+
+    Controller::click(st, boardPx(305), 5); // click the white rook now sitting at (0,3)
+    CHECK_FALSE(st.selection.active);
+}
+
+TEST_CASE("handleClick cannot reselect a different piece once the game is over") {
+    // Guards against a subtler gap than the "open a fresh selection" case:
+    // if a selection were somehow still active post-game-over, the
+    // "reselect a same-side piece" branch must also refuse to run.
+    GameState st = makeState({"wR . . bK", "wN . . .", ". . . .", ". . . ."});
+    st.selection = {true, {0, 0}, 0};
+    sendMove(st, 0, 3);
+    handleWait(st, 3000);
+    REQUIRE(st.gameOver);
+
+    st.selection = {true, {0, 3}, st.elapsedMs};   // force a selection back open, bypassing Controller
+    Controller::click(st, boardPx(5), 105); // click the white knight at (1,0) - same side
+
+    CHECK(st.selection.active);        // untouched: click() returned before touching selection at all
+    CHECK(st.selection.cell.row == 0); // still the rook, not reselected onto the knight
+    CHECK(st.selection.cell.col == 3);
 }
 
 TEST_CASE("handleWait advances the clock and resolves due moves") {
