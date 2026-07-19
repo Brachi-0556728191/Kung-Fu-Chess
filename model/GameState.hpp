@@ -1,8 +1,11 @@
 #pragma once
 
+#include <vector>
+
 #include "Board.hpp"
 #include "Position.hpp"
 #include "PieceMove.hpp"
+#include "MoveRecord.hpp"
 #include "../realtime/RealTimeArbiter.hpp"
 
 struct Selection {
@@ -17,7 +20,8 @@ struct GameState {
     Board           board;
     long            elapsedMs = 0;
     Selection       selection;
-    RealTimeArbiter arbiter;   // RealTimeArbiter owns the active-motion state;
-                               // GameState merely holds an instance of it.
+    RealTimeArbiter arbiter;   
     bool            gameOver = false;
+
+    std::vector<MoveRecord> moveHistory;
 };

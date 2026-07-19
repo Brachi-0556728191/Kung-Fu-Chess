@@ -114,6 +114,8 @@ std::vector<ArrivalEvent> RealTimeArbiter::resolveMoves(long elapsedMs, Board& b
                               elapsedMs + config::statsFor(movingPiece->kind).longRestMs);
 
                     event.pieceArrived = true;
+                    event.move = MoveRecord{movingPiece->color, movingPiece->kind, m.from, m.to,
+                                             event.capturedPiece.has_value()};
                 }
                 // else: friendly-blocked - event.pieceArrived stays false,
                 // board unchanged, and activeJump_ (if any) is left untouched.

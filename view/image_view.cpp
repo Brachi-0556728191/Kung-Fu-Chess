@@ -13,6 +13,7 @@
 #include <opencv2/highgui.hpp>
 #include <opencv2/imgproc.hpp>
 
+#include "../model/MoveRecord.hpp"
 #include "../rules/config.hpp"
 
 #ifndef CHESS_ASSETS_DIR
@@ -23,13 +24,23 @@ namespace view {
 
 namespace {
 
-const cv::Scalar LIGHT_SQUARE(181, 217, 240);
-const cv::Scalar DARK_SQUARE(99, 136, 181);
 const cv::Scalar SELECTION_BORDER(60, 220, 60);
 
-/
 const cv::Scalar REST_OVERLAY_COLOR(245, 250, 250);
 constexpr double REST_OVERLAY_MAX_ALPHA = 0.55;
+
+
+const cv::Scalar HISTORY_BG_COLOR(40, 40, 40);
+const cv::Scalar HISTORY_TEXT_COLOR(225, 225, 225);
+const cv::Scalar HISTORY_HEADER_COLOR(0, 215, 255);
+
+constexpr int HISTORY_HEADER_Y = 30;
+constexpr int HISTORY_FIRST_ROW_Y = 60;
+constexpr int HISTORY_ROW_HEIGHT = 24;
+constexpr double HISTORY_ROW_FONT_SCALE = 0.5;
+
+const cv::Scalar COORDINATE_LABEL_COLOR(40, 40, 40);
+constexpr double COORDINATE_LABEL_FONT_SCALE = 0.4;
 
 
 cv::Mat addAlphaFromBackground(const cv::Mat& bgr) {
@@ -77,18 +88,98 @@ void overlayImage(cv::Mat& background, const cv::Mat& foreground, cv::Point loca
     }
 }
 
-
-void drawRestOverlay(cv::Mat& image, int row, int col, double remainingFraction) {
+// Draws the cooling time
+void drawRestOverlay(cv::Mat& image, int boardX, int row, int col, double remainingFraction) {
     int overlayHeight = static_cast<int>(config::CELL_SIZE * remainingFraction);
     if (overlayHeight <= 0) return;
 
-    cv::Rect overlayRect(col * config::CELL_SIZE,
+    cv::Rect overlayRect(boardX + col * config::CELL_SIZE,
                           row * config::CELL_SIZE + (config::CELL_SIZE - overlayHeight),
                           config::CELL_SIZE, overlayHeight);
 
     cv::Mat roi = image(overlayRect);
     cv::Mat tint(roi.size(), roi.type(), REST_OVERLAY_COLOR);
     cv::addWeighted(tint, REST_OVERLAY_MAX_ALPHA, roi, 1.0 - REST_OVERLAY_MAX_ALPHA, 0.0, roi);
+}
+
+// return match letters
+char fileLetter(int col) {
+    return static_cast<char>('a' + col);
+}
+
+// return match numbers
+int rankNumber(int row, int boardRows) {
+    return boardRows - row;
+}
+
+// e.g. Position{3,0} on an 8-row board -> "a5".
+std::string squareLabel(Position pos, int boardRows) {
+    return std::string(1, fileLetter(pos.col)) + std::to_string(rankNumber(pos.row, boardRows));
+}
+
+
+std::string moveHistoryLine(int moveNumber, const MoveRecord& rec, int boardRows) {
+    std::ostringstream out;
+    out << moveNumber << ". " << charFromKind(rec.kind)
+        << " (" << squareLabel(rec.from, boardRows) << ")"
+        << "->(" << squareLabel(rec.to, boardRows) << ")";
+    if (rec.captured) out << " x";
+    return out.str();
+}
+
+// Draws one move-history panel
+void drawHistoryPanel(cv::Mat& image, int panelX, int panelWidth, int panelHeight,
+                       const std::string& title, const std::vector<MoveRecord>& moves, int boardRows) {
+    cv::Rect panelRect(panelX, 0, panelWidth, panelHeight);
+    image(panelRect) = HISTORY_BG_COLOR;
+
+    cv::putText(image, title, cv::Point(panelX + 10, HISTORY_HEADER_Y),
+                cv::FONT_HERSHEY_SIMPLEX, 0.6, HISTORY_HEADER_COLOR, 2, cv::LINE_AA);
+
+    int maxRows = std::max(0, (panelHeight - HISTORY_FIRST_ROW_Y) / HISTORY_ROW_HEIGHT);
+    int total = static_cast<int>(moves.size());
+    int start = std::max(0, total - maxRows);
+
+    int y = HISTORY_FIRST_ROW_Y;
+    for (int i = start; i < total; ++i) {
+        cv::putText(image, moveHistoryLine(i + 1, moves[i], boardRows), cv::Point(panelX + 10, y),
+                    cv::FONT_HERSHEY_SIMPLEX, HISTORY_ROW_FONT_SCALE, HISTORY_TEXT_COLOR, 1, cv::LINE_AA);
+        y += HISTORY_ROW_HEIGHT;
+    }
+}
+
+// draw Rank Label on left colum.
+void drawRankLabel(cv::Mat& image, int boardX, int row, int boardRows) {
+    cv::putText(image, std::to_string(rankNumber(row, boardRows)),
+                cv::Point(boardX + 4, row * config::CELL_SIZE + 16),
+                cv::FONT_HERSHEY_SIMPLEX, COORDINATE_LABEL_FONT_SCALE, COORDINATE_LABEL_COLOR, 1, cv::LINE_AA);
+}
+
+// draw Rank Label on botton row.
+void drawFileLabel(cv::Mat& image, int boardX, int col, int boardRows) {
+    int row = boardRows - 1;
+    cv::putText(image, std::string(1, fileLetter(col)),
+                cv::Point(boardX + col * config::CELL_SIZE + config::CELL_SIZE - 14,
+                          row * config::CELL_SIZE + config::CELL_SIZE - 6),
+                cv::FONT_HERSHEY_SIMPLEX, COORDINATE_LABEL_FONT_SCALE, COORDINATE_LABEL_COLOR, 1, cv::LINE_AA);
+}
+
+
+cv::Mat loadBoardBackground(int width, int height) {
+    static std::map<std::string, cv::Mat> cache;
+
+    std::string key = std::to_string(width) + "x" + std::to_string(height);
+    auto it = cache.find(key);
+    if (it != cache.end()) return it->second;
+
+    Img loader;
+    loader.read(std::string(CHESS_ASSETS_DIR) + "/board.png", {width, height},
+                /*keep_aspect=*/false, cv::INTER_LINEAR);
+    cv::Mat background = loader.get_mat();
+    if (background.channels() == 4) cv::cvtColor(background, background, cv::COLOR_BGRA2BGR);
+
+    cache[key] = background;
+    return background;
 }
 
 std::string pieceFolder(Kind kind, Color color) {
@@ -102,7 +193,7 @@ std::string stateDir(Kind kind, Color color, AnimationState state) {
            "/states/" + animationStateFolder(state);
 }
 
-}  // namespace
+}  
 
 std::string pieceSpritePath(Kind kind, Color color, AnimationState state, int frameIndex) {
     return stateDir(kind, color, state) + "/sprites/" + std::to_string(frameIndex + 1) + ".png";
@@ -115,14 +206,10 @@ cv::Mat loadPieceSprite(Kind kind, Color color, AnimationState state, int frameI
     auto it = cache.find(path);
     if (it != cache.end()) return it->second;
 
-    // Required course library handles loading + resizing; it throws
-    // std::runtime_error itself if the file can't be read.
     Img loader;
     loader.read(path, {config::CELL_SIZE, config::CELL_SIZE}, /*keep_aspect=*/false, cv::INTER_LINEAR);
     cv::Mat sprite = loader.get_mat();
 
-    // The sprites have no alpha channel, and Img doesn't synthesize one -
-    // this stays our own code regardless of the loading backend.
     if (sprite.channels() == 3) sprite = addAlphaFromBackground(sprite);
 
     cache[path] = sprite;
@@ -158,20 +245,22 @@ cv::Mat renderBoard(const GameState& state) {
     const Board& board = state.board;
     int rows = board.rows();
     int cols = board.cols();
-    // יצירת תמונה ריקה בגודל המתאים ללוח (שורות כפול גודל תא) עם 3 ערוצי צבע (RGB) וצבע רקע שחור.
-    cv::Mat image(rows * config::CELL_SIZE, cols * config::CELL_SIZE, CV_8UC3, cv::Scalar(0, 0, 0));
+    int boardWidth  = cols * config::CELL_SIZE;
+    int boardHeight = rows * config::CELL_SIZE;
 
-    // צביעת התא בצבע בהיר או כהה לפי חישוב זוגיות האינדקסים (יצירת אפקט לוח משבצות).
-    for (int r = 0; r < rows; ++r) {
-        for (int c = 0; c < cols; ++c) {
-            cv::Rect cell(c * config::CELL_SIZE, r * config::CELL_SIZE, config::CELL_SIZE, config::CELL_SIZE);
-            image(cell) = ((r + c) % 2 == 0) ? LIGHT_SQUARE : DARK_SQUARE;
-        }
-    }
+    int boardX = config::HISTORY_PANEL_WIDTH;
+    int canvasWidth = config::HISTORY_PANEL_WIDTH + boardWidth + config::HISTORY_PANEL_WIDTH;
+
+    // יצירת תמונה ריקה בגודל המתאים ללוח (שורות כפול גודל תא) עם 3 ערוצי צבע (RGB) וצבע רקע שחור.
+    cv::Mat image(boardHeight, canvasWidth, CV_8UC3, cv::Scalar(0, 0, 0));
+
+    // הדבקת תמונת הרקע של הלוח 
+    cv::Mat boardBackground = loadBoardBackground(boardWidth, boardHeight);
+    boardBackground.copyTo(image(cv::Rect(boardX, 0, boardWidth, boardHeight)));
 
     // בדיקה האם יש כלי שנבחר על ידי השחקן.
     if (state.selection.active) {
-        cv::Rect cell(state.selection.cell.col * config::CELL_SIZE, state.selection.cell.row * config::CELL_SIZE,
+        cv::Rect cell(boardX + state.selection.cell.col * config::CELL_SIZE, state.selection.cell.row * config::CELL_SIZE,
                         //חישוב המיקום בפיקסלים של התא שנבחר
                       config::CELL_SIZE, config::CELL_SIZE);
         // ציור מסגרת מסביב לתא שנבחר בעובי 4 פיקסלים.
@@ -191,12 +280,12 @@ cv::Mat renderBoard(const GameState& state) {
             // טעינת תמונת הפריים המתאימה לכלי.
             cv::Mat sprite = loadPieceSprite(piece->kind, piece->color, anim.state, frame);
 
-            
+
             // קביעת מיקום ברירת המחדל לציור הכלי בפיקסלים.
-            cv::Point drawAt(c * config::CELL_SIZE, r * config::CELL_SIZE);
+            cv::Point drawAt(boardX + c * config::CELL_SIZE, r * config::CELL_SIZE);
             // בדיקה האם הכלי נמצא במצב תנועה (Move).
             if (anim.state == AnimationState::Move) {
-               
+
                 PieceMove move = *state.arbiter.activeMoveFor(Position{r, c});
                 double t = (move.durationMs > 0)
                                ? double(state.elapsedMs - move.startMs) / double(move.durationMs)
@@ -205,7 +294,7 @@ cv::Mat renderBoard(const GameState& state) {
 
                 double row = move.from.row + (move.to.row - move.from.row) * t;
                 double col = move.from.col + (move.to.col - move.from.col) * t;
-                drawAt = cv::Point(static_cast<int>(col * config::CELL_SIZE),
+                drawAt = cv::Point(boardX + static_cast<int>(col * config::CELL_SIZE),
                                     static_cast<int>(row * config::CELL_SIZE));
             }
             // ציור (הדבקה) של הספרייט של הכלי על גבי התמונה הראשית במיקום המחושב.
@@ -213,10 +302,22 @@ cv::Mat renderBoard(const GameState& state) {
 
             // If the piece is cooling down, draw the draining overlay on top
             if (auto remaining = restRemainingFraction(*piece, state.arbiter, state.elapsedMs)) {
-                drawRestOverlay(image, r, c, *remaining);
+                drawRestOverlay(image, boardX, r, c, *remaining);
             }
         }
     }
+
+    
+    for (int r = 0; r < rows; ++r) drawRankLabel(image, boardX, r, rows);
+    for (int c = 0; c < cols; ++c) drawFileLabel(image, boardX, c, rows);
+
+    // input the move to the match record panel.
+    std::vector<MoveRecord> blackMoves, whiteMoves;
+    for (const MoveRecord& rec : state.moveHistory) {
+        (rec.color == Color::White ? whiteMoves : blackMoves).push_back(rec);
+    }
+    drawHistoryPanel(image, 0, config::HISTORY_PANEL_WIDTH, boardHeight, "Black (Player B)", blackMoves, rows);
+    drawHistoryPanel(image, boardX + boardWidth, config::HISTORY_PANEL_WIDTH, boardHeight, "White (Player A)", whiteMoves, rows);
 
     return image;
 }

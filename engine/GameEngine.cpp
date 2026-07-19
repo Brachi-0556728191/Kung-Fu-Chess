@@ -76,6 +76,7 @@ void handleWait(GameState& st, long ms) {
     st.elapsedMs += ms;
     std::vector<ArrivalEvent> events = st.arbiter.advanceTime(st.elapsedMs, st.board);
     for (const ArrivalEvent& event : events) {
+        if (event.move) st.moveHistory.push_back(*event.move);
         if (event.capturedPiece && event.capturedPiece->kind == Kind::King) {
             st.gameOver = true;
         }

@@ -9,6 +9,7 @@
 #include "../model/Piece.hpp"
 #include "../io/BoardParser.hpp"
 #include "../io/BoardPrinter.hpp"
+#include "../rules/config.hpp"
 
 #include <sstream>
 #include <iostream>
@@ -19,6 +20,13 @@ namespace {
         st.board = parseBoard(boardLines);
         return st;
     }
+
+    // All click/jump pixel tests below target board-relative pixels; the
+    // actual window has a history panel to the left of the board (see
+    // view::renderBoard / BoardMapper::pixelToCell), so every real x
+    // coordinate must be shifted by that panel's width to land on the
+    // intended cell.
+    int boardPx(int x) { return config::HISTORY_PANEL_WIDTH + x; }
 
     std::string tokenAt(const Board& b, Position pos) {
         auto piece = b.pieceAt(pos);
@@ -610,7 +618,7 @@ TEST_CASE("a king destroyed via jump interception sets gameOver true") {
 TEST_CASE("handleClick opens a fresh selection when clicking an idle piece") {
     GameState st = makeState({"wK . . .", ". . . .", ". . . .", ". . . ."});
 
-    Controller::click(st, 5, 5); // inside cell (0,0)
+    Controller::click(st, boardPx(5), 5); // inside cell (0,0)
 
     CHECK(st.selection.active);
     CHECK(st.selection.cell.row == 0);
@@ -621,7 +629,7 @@ TEST_CASE("handleClick reselects when clicking another piece of the same color")
     GameState st = makeState({"wK . wQ .", ". . . .", ". . . .", ". . . ."});
     st.selection = {true, {0, 0}, 0};
 
-    Controller::click(st, 205, 5); // cell (0,2), also white
+    Controller::click(st, boardPx(205), 5); // cell (0,2), also white
 
     CHECK(st.selection.active);
     CHECK(st.selection.cell.col == 2);
@@ -631,7 +639,7 @@ TEST_CASE("handleClick completes a pending selection when clicking an empty cell
     GameState st = makeState({"wR . . .", ". . . .", ". . . .", ". . . ."});
     st.selection = {true, {0, 0}, 0};
 
-    Controller::click(st, 305, 5); // empty cell (0,3)
+    Controller::click(st, boardPx(305), 5); // empty cell (0,3)
 
     CHECK(tokenAt(st.board, {0, 0}) == "wR");
     REQUIRE(st.arbiter.hasActiveMotion());
@@ -644,7 +652,7 @@ TEST_CASE("handleClick completes a pending selection as a capture on an enemy ce
     GameState st = makeState({"wR . . bP", ". . . .", ". . . .", ". . . ."});
     st.selection = {true, {0, 0}, 0};
 
-    Controller::click(st, 305, 5); // the black pawn at (0,3)
+    Controller::click(st, boardPx(305), 5); // the black pawn at (0,3)
 
     CHECK(tokenAt(st.board, {0, 0}) == "wR");
     REQUIRE(st.arbiter.hasActiveMotion());
@@ -657,7 +665,7 @@ TEST_CASE("handleClick completes a pending selection as a capture on an enemy ce
 TEST_CASE("handleClick with no pending selection opens a selection regardless of piece color") {
     GameState st = makeState({"wR . . bP", ". . . .", ". . . .", ". . . ."});
 
-    Controller::click(st, 305, 5); // black's pawn, nobody is pending
+    Controller::click(st, boardPx(305), 5); // black's pawn, nobody is pending
 
     CHECK(tokenAt(st.board, {0, 3}) == "bP");
     CHECK_FALSE(st.arbiter.hasActiveMotion());
@@ -676,7 +684,7 @@ TEST_CASE("handleClick ignores clicks outside the board") {
 TEST_CASE("handleClick cancels an active selection on an outside-board click") {
     GameState st = makeState({"wR . . bN", ". . . .", ". . . .", ". . . ."});
 
-    Controller::click(st, 5, 5); // select the rook at (0,0)
+    Controller::click(st, boardPx(5), 5); // select the rook at (0,0)
     REQUIRE(st.selection.active);
 
     Controller::click(st, -5, -5); // outside the board -> must cancel the selection
@@ -685,7 +693,7 @@ TEST_CASE("handleClick cancels an active selection on an outside-board click") {
 
     // The next in-bounds click must open a fresh selection on the enemy
     // knight, not be misread as completing a move from the stale selection.
-    Controller::click(st, 305, 5); // click on the black knight at (0,3)
+    Controller::click(st, boardPx(305), 5); // click on the black knight at (0,3)
 
     CHECK_FALSE(st.arbiter.hasActiveMotion());
     CHECK(tokenAt(st.board, {0, 0}) == "wR");   // rook never moved
@@ -695,7 +703,7 @@ TEST_CASE("handleClick cancels an active selection on an outside-board click") {
 
 TEST_CASE("handleClick on an empty cell with no pending selection is a no-op") {
     GameState st = makeState({". . .", ". . .", ". . ."});
-    Controller::click(st, 5, 5);
+    Controller::click(st, boardPx(5), 5);
     CHECK_FALSE(st.selection.active);
 }
 
@@ -712,6 +720,79 @@ TEST_CASE("handleWait advances the clock and resolves due moves") {
     CHECK(tokenAt(st.board, {0, 3}) == "wR");
 }
 
+TEST_CASE("handleWait records a MoveRecord in GameState::moveHistory when a move lands") {
+    GameState st = makeState({"wR . . ."});
+    PieceMove m; m.from = {0, 0}; m.to = {0, 3};
+    m.startMs = 0; m.durationMs = 100; m.piece = "wR";
+    st.arbiter.startMotion(m);
+
+    handleWait(st, 150);
+
+    REQUIRE(st.moveHistory.size() == 1);
+    const MoveRecord& rec = st.moveHistory[0];
+    CHECK(rec.color == Color::White);
+    CHECK(rec.kind == Kind::Rook);
+    CHECK(rec.from == Position{0, 0});
+    CHECK(rec.to == Position{0, 3});
+    CHECK_FALSE(rec.captured);
+}
+
+TEST_CASE("handleWait's recorded MoveRecord has captured=true when the arrival is a capture") {
+    GameState st = makeState({"wR . . bP"});
+    PieceMove m; m.from = {0, 0}; m.to = {0, 3};
+    m.startMs = 0; m.durationMs = 100; m.piece = "wR";
+    st.arbiter.startMotion(m);
+
+    handleWait(st, 150);
+
+    REQUIRE(st.moveHistory.size() == 1);
+    CHECK(st.moveHistory[0].captured);
+}
+
+TEST_CASE("handleWait does not record a MoveRecord for a friendly-blocked arrival") {
+    GameState st = makeState({"wR . . wP"});
+    PieceMove m; m.from = {0, 0}; m.to = {0, 3};
+    m.startMs = 0; m.durationMs = 100; m.piece = "wR";
+    st.arbiter.startMotion(m);
+
+    handleWait(st, 150);
+
+    CHECK(st.moveHistory.empty());
+}
+
+TEST_CASE("handleWait does not record a MoveRecord for a piece destroyed mid-flight by jump interception") {
+    GameState st = makeState({"wR . bN"});
+    st.arbiter.startJump({0, 0}, 0);   // wR jumps in place
+
+    PieceMove m; m.from = {0, 2}; m.to = {0, 0}; m.startMs = 0; m.durationMs = 999; m.piece = "bN";
+    st.arbiter.startMotion(m);
+
+    handleWait(st, 999);
+
+    // The black knight never completed a move - it was destroyed in transit -
+    // so it must not appear in the history, even though an ArrivalEvent with
+    // a capturedPiece was produced.
+    CHECK(st.moveHistory.empty());
+}
+
+TEST_CASE("handleWait appends multiple independent MoveRecords in arrival order") {
+    GameState st = makeState({"wR . . .", ". . . .", ". . . .", "wN . . ."});
+
+    PieceMove rookMove; rookMove.from = {0, 0}; rookMove.to = {0, 3};
+    rookMove.startMs = 0; rookMove.durationMs = 500; rookMove.piece = "wR";
+    st.arbiter.startMotion(rookMove);
+
+    PieceMove knightMove; knightMove.from = {3, 0}; knightMove.to = {2, 2};
+    knightMove.startMs = 0; knightMove.durationMs = 300; knightMove.piece = "wN";
+    st.arbiter.startMotion(knightMove);
+
+    handleWait(st, 500);
+
+    REQUIRE(st.moveHistory.size() == 2);
+    CHECK(st.moveHistory[0].kind == Kind::Knight);   // due at 300ms, settles first
+    CHECK(st.moveHistory[1].kind == Kind::Rook);      // due at 500ms, settles second
+}
+
 TEST_CASE("runCommands executes click, wait and print in sequence") {
     GameState st = makeState({"wR . . .", ". . . .", ". . . .", ". . . ."});
 
@@ -719,8 +800,8 @@ TEST_CASE("runCommands executes click, wait and print in sequence") {
     std::streambuf* old = std::cout.rdbuf(captured.rdbuf());
 
     std::vector<std::string> commands = {
-        "click 5 5",
-        "click 305 5",
+        "click " + std::to_string(boardPx(5)) + " 5",
+        "click " + std::to_string(boardPx(305)) + " 5",
         "wait 3000", // rook: 1.0 cells/sec, 3 cells travelled -> 3000ms to arrive
         "print board"
     };
@@ -742,8 +823,8 @@ TEST_CASE("runCommands demonstrates a pawn's two-square opening move with a clea
     std::streambuf* old = std::cout.rdbuf(captured.rdbuf());
 
     std::vector<std::string> commands = {
-        "click 5 305",   // select the pawn at (3,0)
-        "click 5 105",   // move it two squares to (1,0)
+        "click " + std::to_string(boardPx(5)) + " 305",   // select the pawn at (3,0)
+        "click " + std::to_string(boardPx(5)) + " 105",   // move it two squares to (1,0)
         "wait 2000",     // pawn: 1.0 cells/sec, 2 cells travelled -> 2000ms
         "print board"
     };
@@ -762,8 +843,8 @@ TEST_CASE("runCommands demonstrates a pawn promoting to a queen upon reaching th
     std::streambuf* old = std::cout.rdbuf(captured.rdbuf());
 
     std::vector<std::string> commands = {
-        "click 5 105",   // select the pawn at (1,0), one square from the last row
-        "click 5 5",     // move it to (0,0)
+        "click " + std::to_string(boardPx(5)) + " 105",   // select the pawn at (1,0), one square from the last row
+        "click " + std::to_string(boardPx(5)) + " 5",     // move it to (0,0)
         "wait 1000",     // pawn: 1.0 cells/sec, 1 cell travelled -> 1000ms
         "print board"
     };
@@ -782,9 +863,9 @@ TEST_CASE("runCommands demonstrates a successful jump interception") {
     std::streambuf* old = std::cout.rdbuf(captured.rdbuf());
 
     std::vector<std::string> commands = {
-        "jump 5 5",      // wR at (0,0) jumps in place
-        "click 105 5",   // select bR at (0,1)
-        "click 5 5",     // send it toward wR's cell - a legal 1-cell rook move
+        "jump " + std::to_string(boardPx(5)) + " 5",      // wR at (0,0) jumps in place
+        "click " + std::to_string(boardPx(105)) + " 5",   // select bR at (0,1)
+        "click " + std::to_string(boardPx(5)) + " 5",     // send it toward wR's cell - a legal 1-cell rook move
         "wait 1000",     // rook: 1.0 cells/sec, 1 cell -> 1000ms - same tick as the jump's window
         "print board"
     };
@@ -805,7 +886,7 @@ TEST_CASE("runCommands demonstrates a jump landing normally with no interception
     std::streambuf* old = std::cout.rdbuf(captured.rdbuf());
 
     std::vector<std::string> commands = {
-        "jump 5 5",      // wR at (0,0) jumps in place
+        "jump " + std::to_string(boardPx(5)) + " 5",      // wR at (0,0) jumps in place
         "wait 1000",     // no enemy arrives - the jump simply lands
         "print board"
     };
@@ -825,9 +906,9 @@ TEST_CASE("runCommands demonstrates a rejected move attempt against a currently-
     std::streambuf* old = std::cout.rdbuf(captured.rdbuf());
 
     std::vector<std::string> commands = {
-        "jump 5 5",      // wR at (0,0) starts jumping
-        "click 5 5",     // select the jumping rook itself
-        "click 205 5",   // attempt to move it - must be rejected outright
+        "jump " + std::to_string(boardPx(5)) + " 5",      // wR at (0,0) starts jumping
+        "click " + std::to_string(boardPx(5)) + " 5",     // select the jumping rook itself
+        "click " + std::to_string(boardPx(205)) + " 5",   // attempt to move it - must be rejected outright
         "wait 1000",     // the jump lands normally in the meantime
         "print board"
     };

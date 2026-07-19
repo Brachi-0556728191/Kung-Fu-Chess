@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "../model/Board.hpp"
+#include "../model/MoveRecord.hpp"
 #include "../model/Piece.hpp"
 #include "../model/PieceJump.hpp"
 #include "../model/PieceMove.hpp"
@@ -24,6 +25,8 @@ private:
 struct ArrivalEvent {
     bool pieceArrived = false;
     std::optional<Piece> capturedPiece;
+
+    std::optional<MoveRecord> move;
 };
 
 class RealTimeArbiter {
@@ -31,10 +34,7 @@ public:
     bool hasActiveMotion() const;
     void startMotion(const PieceMove& move);
 
-    // Advances the clock and settles every motion whose arrival time has
-    // passed. Several pieces can be independently in flight at once, so this
-    // returns one ArrivalEvent per motion that settled this call (in arrival
-    // order), not just zero-or-one.
+   
     std::vector<ArrivalEvent> advanceTime(long elapsedMs, Board& board);
 
     // The motion belonging to the piece currently sitting at `pos`, if any.
@@ -46,9 +46,7 @@ public:
     void startJump(Position cell, long startMs);
     std::optional<PieceJump> activeJump() const;
 
-    // A resting piece is one cooling down after a move (RestKind::Long) or
-    // a jump (RestKind::Short); GameEngine consults this to refuse further
-    // moves/jumps, and the view consults it to pick the rest animation.
+    
     std::optional<PieceRest> activeRest(int pieceId) const;
 
 private:
