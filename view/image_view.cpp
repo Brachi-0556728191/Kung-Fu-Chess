@@ -14,6 +14,7 @@
 #include <opencv2/imgproc.hpp>
 
 #include "../model/MoveRecord.hpp"
+#include "../rules/RuleEngine.hpp"
 #include "../rules/config.hpp"
 
 #ifndef CHESS_ASSETS_DIR
@@ -28,6 +29,12 @@ const cv::Scalar SELECTION_BORDER(60, 220, 60);
 
 const cv::Scalar REST_OVERLAY_COLOR(245, 250, 250);
 constexpr double REST_OVERLAY_MAX_ALPHA = 0.55;
+
+// Light, semi-transparent tint for a selected piece's legal destination
+// squares - same cv::addWeighted technique as REST_OVERLAY, just covering
+// the whole cell instead of a draining partial height.
+const cv::Scalar LEGAL_MOVE_HIGHLIGHT_COLOR(140, 245, 140);
+constexpr double LEGAL_MOVE_HIGHLIGHT_ALPHA = 0.35;
 
 
 const cv::Scalar HISTORY_BG_COLOR(40, 40, 40);
@@ -102,6 +109,15 @@ void drawRestOverlay(cv::Mat& image, int boardX, int row, int col, double remain
     cv::Mat roi = image(overlayRect);
     cv::Mat tint(roi.size(), roi.type(), REST_OVERLAY_COLOR);
     cv::addWeighted(tint, REST_OVERLAY_MAX_ALPHA, roi, 1.0 - REST_OVERLAY_MAX_ALPHA, 0.0, roi);
+}
+
+// Tints one full cell to mark it as a legal destination for the currently
+void drawLegalMoveHighlight(cv::Mat& image, int boardX, Position pos) {
+    cv::Rect cellRect(boardX + pos.col * config::CELL_SIZE, pos.row * config::CELL_SIZE,
+                       config::CELL_SIZE, config::CELL_SIZE);
+    cv::Mat roi = image(cellRect);
+    cv::Mat tint(roi.size(), roi.type(), LEGAL_MOVE_HIGHLIGHT_COLOR);
+    cv::addWeighted(tint, LEGAL_MOVE_HIGHLIGHT_ALPHA, roi, 1.0 - LEGAL_MOVE_HIGHLIGHT_ALPHA, 0.0, roi);
 }
 
 // return match letters
@@ -314,6 +330,14 @@ cv::Mat renderBoard(const GameState& state) {
     }
 
     
+    if (state.selection.active) {
+        if (auto selectedPiece = board.pieceAt(state.selection.cell)) {
+            for (Position dest : legalDestinations(board, *selectedPiece)) {
+                drawLegalMoveHighlight(image, boardX, dest);
+            }
+        }
+    }
+
     for (int r = 0; r < rows; ++r) drawRankLabel(image, boardX, r, rows);
     for (int c = 0; c < cols; ++c) drawFileLabel(image, boardX, c, rows);
 

@@ -2,6 +2,7 @@
 
 #include "Piece.hpp"
 
+struct Score {
     int white = 0;
     int black = 0;
 

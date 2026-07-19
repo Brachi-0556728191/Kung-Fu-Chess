@@ -185,3 +185,97 @@ TEST_CASE("isLegalMove returns false when no move rule is registered for a kind"
 
     CHECK_FALSE(isLegalMove(b, makeMove(0, 0, 0, 2, "wR"), 'R'));
 }
+
+namespace {
+    bool contains(const std::vector<Position>& positions, Position p) {
+        for (Position pos : positions) if (pos == p) return true;
+        return false;
+    }
+}
+
+TEST_CASE("legalDestinations: rook on an empty board returns every square on its rank and file") {
+    Board b = parseBoard({"wR . . .", ". . . .", ". . . .", ". . . ."});
+    Piece rook = *b.pieceAt({0, 0});
+
+    std::vector<Position> dest = legalDestinations(b, rook);
+
+    CHECK(dest.size() == 6);   // 3 along the rank + 3 along the file
+    CHECK(contains(dest, {0, 3}));
+    CHECK(contains(dest, {3, 0}));
+    CHECK_FALSE(contains(dest, {1, 1}));   // never a diagonal
+}
+
+TEST_CASE("legalDestinations: rook's slide stops at the first blocker and excludes squares beyond it") {
+    Board b = parseBoard({"wR wP . .", ". . . .", ". . . .", ". . . ."});
+    Piece rook = *b.pieceAt({0, 0});
+
+    std::vector<Position> dest = legalDestinations(b, rook);
+
+    CHECK_FALSE(contains(dest, {0, 1}));   // occupied by a friendly pawn - not even a capture
+    CHECK_FALSE(contains(dest, {0, 2}));   // beyond the blocker - unreachable
+    CHECK(contains(dest, {1, 0}));         // the file is still clear
+}
+
+TEST_CASE("legalDestinations: a slide includes an enemy-occupied square as a capture but nothing beyond it") {
+    Board b = parseBoard({"wR bP . .", ". . . .", ". . . .", ". . . ."});
+    Piece rook = *b.pieceAt({0, 0});
+
+    std::vector<Position> dest = legalDestinations(b, rook);
+
+    CHECK(contains(dest, {0, 1}));         // capture the enemy pawn
+    CHECK_FALSE(contains(dest, {0, 2}));   // path is blocked at the captured square
+}
+
+TEST_CASE("legalDestinations: knight ignores blocking pieces entirely") {
+    Board b = parseBoard({
+        "wN wP . .",
+        "wP wP . .",
+        ". . . .",
+        ". . . ."
+    });
+    Piece knight = *b.pieceAt({0, 0});
+
+    std::vector<Position> dest = legalDestinations(b, knight);
+
+    // Both L-shaped targets are reachable even though every square adjacent
+    // to the knight is occupied - a knight has no path to clear.
+    CHECK(dest.size() == 2);
+    CHECK(contains(dest, {1, 2}));
+    CHECK(contains(dest, {2, 1}));
+}
+
+TEST_CASE("legalDestinations: pawn's two-square opening move disappears once it has moved") {
+    Board b = parseBoard({". . .", ". . .", ". . .", "wP . ."});
+    Piece pawn = *b.pieceAt({3, 0});
+
+    CHECK(contains(legalDestinations(b, pawn), {1, 0}));   // two squares forward, still available
+
+    b.movePiece({3, 0}, {2, 0});
+    Piece movedPawn = *b.pieceAt({2, 0});
+    std::vector<Position> destAfter = legalDestinations(b, movedPawn);
+
+    CHECK(contains(destAfter, {1, 0}));    // one square forward: still legal
+    CHECK_FALSE(contains(destAfter, {0, 0})); // two squares: no longer legal, hasMoved is now true
+}
+
+TEST_CASE("legalDestinations: king returns only its 8 (or fewer, near an edge) adjacent squares") {
+    Board b = parseBoard({"wK . .", ". . .", ". . ."});
+    Piece king = *b.pieceAt({0, 0});
+
+    std::vector<Position> dest = legalDestinations(b, king);
+
+    CHECK(dest.size() == 3);   // corner square: only 3 of the normal 8 neighbors are in bounds
+    CHECK(contains(dest, {0, 1}));
+    CHECK(contains(dest, {1, 0}));
+    CHECK(contains(dest, {1, 1}));
+}
+
+TEST_CASE("legalDestinations: an isolated piece with no legal moves returns an empty list") {
+    // A corner knight has only two in-bounds candidate squares, (1,2) and
+    // (2,1) - both occupied by friendly pawns here, so neither is reachable
+    // (a knight can jump over blockers, but can never land on its own color).
+    Board b = parseBoard({"wN . .", ". . wP", ". wP ."});
+    Piece knight = *b.pieceAt({0, 0});
+
+    CHECK(legalDestinations(b, knight).empty());
+}
