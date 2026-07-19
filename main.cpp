@@ -1,3 +1,9 @@
+#ifdef _WIN32
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#endif
+
 #include "model/Board.hpp"
 #include "model/GameState.hpp"
 #include "io/BoardParser.hpp"
@@ -36,6 +42,10 @@ void onMouse(int event, int x, int y, int /*flags*/, void* userdata) {
 }  // namespace
 
 int main() {
+#ifdef _WIN32
+    SetProcessDPIAware();
+#endif
+
     GameState state;
     state.board = standardStartingBoard();
 
