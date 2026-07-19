@@ -27,10 +27,11 @@ const cv::Scalar LIGHT_SQUARE(181, 217, 240);
 const cv::Scalar DARK_SQUARE(99, 136, 181);
 const cv::Scalar SELECTION_BORDER(60, 220, 60);
 
-// The sprite PNGs have no alpha channel - they're flat-color background.
-// Derive transparency from how close each pixel is to the background color
-// (sampled from the top-left corner), with a soft ramp so edges anti-alias
-// instead of coming out jagged.
+/
+const cv::Scalar REST_OVERLAY_COLOR(245, 250, 250);
+constexpr double REST_OVERLAY_MAX_ALPHA = 0.55;
+
+
 cv::Mat addAlphaFromBackground(const cv::Mat& bgr) {
     const cv::Vec3b bg = bgr.at<cv::Vec3b>(0, 0);
     constexpr int LOW_DIST = 15;
@@ -74,6 +75,20 @@ void overlayImage(cv::Mat& background, const cv::Mat& foreground, cv::Point loca
             }
         }
     }
+}
+
+
+void drawRestOverlay(cv::Mat& image, int row, int col, double remainingFraction) {
+    int overlayHeight = static_cast<int>(config::CELL_SIZE * remainingFraction);
+    if (overlayHeight <= 0) return;
+
+    cv::Rect overlayRect(col * config::CELL_SIZE,
+                          row * config::CELL_SIZE + (config::CELL_SIZE - overlayHeight),
+                          config::CELL_SIZE, overlayHeight);
+
+    cv::Mat roi = image(overlayRect);
+    cv::Mat tint(roi.size(), roi.type(), REST_OVERLAY_COLOR);
+    cv::addWeighted(tint, REST_OVERLAY_MAX_ALPHA, roi, 1.0 - REST_OVERLAY_MAX_ALPHA, 0.0, roi);
 }
 
 std::string pieceFolder(Kind kind, Color color) {
@@ -127,9 +142,7 @@ AnimationTiming loadAnimationTiming(Kind kind, Color color, AnimationState state
     buf << file.rdbuf();
     std::string text = buf.str();
 
-    // Deliberately not a general JSON parser - the config shape is small and
-    // fixed (two leaf fields we care about), so pulling in a JSON library
-    // just for this would be a bigger dependency than the problem warrants.
+   
     AnimationTiming timing{6.0, true};
     std::smatch match;
     if (std::regex_search(text, match, std::regex(R"("frames_per_sec"\s*:\s*([0-9.]+))")))
@@ -145,8 +158,10 @@ cv::Mat renderBoard(const GameState& state) {
     const Board& board = state.board;
     int rows = board.rows();
     int cols = board.cols();
+    // יצירת תמונה ריקה בגודל המתאים ללוח (שורות כפול גודל תא) עם 3 ערוצי צבע (RGB) וצבע רקע שחור.
     cv::Mat image(rows * config::CELL_SIZE, cols * config::CELL_SIZE, CV_8UC3, cv::Scalar(0, 0, 0));
 
+    // צביעת התא בצבע בהיר או כהה לפי חישוב זוגיות האינדקסים (יצירת אפקט לוח משבצות).
     for (int r = 0; r < rows; ++r) {
         for (int c = 0; c < cols; ++c) {
             cv::Rect cell(c * config::CELL_SIZE, r * config::CELL_SIZE, config::CELL_SIZE, config::CELL_SIZE);
@@ -154,9 +169,12 @@ cv::Mat renderBoard(const GameState& state) {
         }
     }
 
+    // בדיקה האם יש כלי שנבחר על ידי השחקן.
     if (state.selection.active) {
         cv::Rect cell(state.selection.cell.col * config::CELL_SIZE, state.selection.cell.row * config::CELL_SIZE,
+                        //חישוב המיקום בפיקסלים של התא שנבחר
                       config::CELL_SIZE, config::CELL_SIZE);
+        // ציור מסגרת מסביב לתא שנבחר בעובי 4 פיקסלים.
         cv::rectangle(image, cell, SELECTION_BORDER, 4);
     }
 
@@ -165,20 +183,20 @@ cv::Mat renderBoard(const GameState& state) {
             auto piece = board.pieceAt(Position{r, c});
             if (!piece) continue;
 
+            /// ביעת מצב האנימציה הנוכחי של הכלי (תזוזה, קפיצה, מנוחה וכו').
             AnimationInfo anim = resolveAnimationState(*piece, state.arbiter);
+            // טעינת נתוני תזמון (קצב פריימים ולולאה) לפי סוג ומצב הכלי.
             AnimationTiming timing = loadAnimationTiming(piece->kind, piece->color, anim.state);
             int frame = animationFrameIndex(state.elapsedMs, anim, timing);
+            // טעינת תמונת הפריים המתאימה לכלי.
             cv::Mat sprite = loadPieceSprite(piece->kind, piece->color, anim.state, frame);
 
-            // A piece still sits at its board cell (Position{r, c}) in the
-            // Board data for the whole flight - RealTimeArbiter only moves
-            // it once the timed motion lands. So for every state except
-            // Move, draw at the literal cell; for Move, interpolate between
-            // from/to using the same PieceMove the arbiter is tracking.
+            
+            // קביעת מיקום ברירת המחדל לציור הכלי בפיקסלים.
             cv::Point drawAt(c * config::CELL_SIZE, r * config::CELL_SIZE);
+            // בדיקה האם הכלי נמצא במצב תנועה (Move).
             if (anim.state == AnimationState::Move) {
-                // guaranteed present: anim.state == Move implies resolveAnimationState
-                // found a move whose `from` is this exact cell.
+               
                 PieceMove move = *state.arbiter.activeMoveFor(Position{r, c});
                 double t = (move.durationMs > 0)
                                ? double(state.elapsedMs - move.startMs) / double(move.durationMs)
@@ -190,8 +208,13 @@ cv::Mat renderBoard(const GameState& state) {
                 drawAt = cv::Point(static_cast<int>(col * config::CELL_SIZE),
                                     static_cast<int>(row * config::CELL_SIZE));
             }
-
+            // ציור (הדבקה) של הספרייט של הכלי על גבי התמונה הראשית במיקום המחושב.
             overlayImage(image, sprite, drawAt);
+
+            // If the piece is cooling down, draw the draining overlay on top
+            if (auto remaining = restRemainingFraction(*piece, state.arbiter, state.elapsedMs)) {
+                drawRestOverlay(image, r, c, *remaining);
+            }
         }
     }
 

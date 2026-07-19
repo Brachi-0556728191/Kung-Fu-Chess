@@ -46,9 +46,6 @@ std::optional<AnimationInfo> checkRest(const Piece& piece, const RealTimeArbiter
     return AnimationInfo{REST_TO_ANIMATION_STATE.at(rest->kind), rest->startMs};
 }
 
-// Priority order matters: a piece that's moving is never also resting (see
-// GameEngine's guards), but this list is what encodes that order explicitly
-// rather than leaving it implicit in if/else-if placement.
 const StateCheck STATE_CHECKS[] = {checkMove, checkJump, checkRest};
 
 }  // namespace
@@ -58,9 +55,6 @@ AnimationInfo resolveAnimationState(const Piece& piece, const RealTimeArbiter& a
         if (auto info = check(piece, arbiter)) return *info;
     }
 
-    // Idle has no distinct "entered at" moment (it's wherever a piece sits
-    // between actions), so it just cycles off the global clock - every idle
-    // piece animates in phase, which is the expected look.
     return {AnimationState::Idle, 0};
 }
 
@@ -69,6 +63,17 @@ int animationFrameIndex(long elapsedMs, const AnimationInfo& info, const Animati
     int frame = static_cast<int>(static_cast<double>(dtMs) * timing.framesPerSec / 1000.0);
     return timing.isLoop ? (frame % ANIMATION_FRAME_COUNT)
                           : std::min(frame, ANIMATION_FRAME_COUNT - 1);
+}
+
+std::optional<double> restRemainingFraction(const Piece& piece, const RealTimeArbiter& arbiter, long elapsedMs) {
+    auto rest = arbiter.activeRest(piece.id);
+    if (!rest) return std::nullopt;
+
+    long totalMs = rest->untilMs - rest->startMs;
+    if (totalMs <= 0) return 0.0;   // degenerate (zero-length) cooldown: already done
+
+    double remaining = double(rest->untilMs - elapsedMs) / double(totalMs);
+    return std::clamp(remaining, 0.0, 1.0);
 }
 
 }  // namespace view
