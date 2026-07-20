@@ -322,8 +322,17 @@ cv::Mat renderBoard(const GameState& state) {
             auto piece = board.pieceAt(Position{r, c});
             if (!piece) continue;
 
+            // Resolve this piece's move/jump/rest data once, up front - these
+            // three queries are the exact raw data both resolveAnimationState
+            // and restRemainingFraction need (see AnimationState.hpp), and a
+            // future network snapshot would carry precisely this same data
+            // instead of a live arbiter reference.
+            auto activeMove = state.arbiter.activeMoveFor(Position{r, c});
+            auto activeJump = state.arbiter.activeJump();
+            auto activeRest = state.arbiter.activeRest(piece->id);
+
             /// ביעת מצב האנימציה הנוכחי של הכלי (תזוזה, קפיצה, מנוחה וכו').
-            AnimationInfo anim = resolveAnimationState(*piece, state.arbiter);
+            AnimationInfo anim = resolveAnimationState(*piece, activeMove, activeJump, activeRest);
             // טעינת נתוני תזמון (קצב פריימים ולולאה) לפי סוג ומצב הכלי.
             AnimationTiming timing = loadAnimationTiming(piece->kind, piece->color, anim.state);
             int frame = animationFrameIndex(state.elapsedMs, anim, timing);
@@ -336,7 +345,7 @@ cv::Mat renderBoard(const GameState& state) {
             // בדיקה האם הכלי נמצא במצב תנועה (Move).
             if (anim.state == AnimationState::Move) {
 
-                PieceMove move = *state.arbiter.activeMoveFor(Position{r, c});
+                const PieceMove& move = *activeMove;
                 double t = (move.durationMs > 0)
                                ? double(state.elapsedMs - move.startMs) / double(move.durationMs)
                                : 1.0;
@@ -351,7 +360,7 @@ cv::Mat renderBoard(const GameState& state) {
             overlayImage(image, sprite, drawAt);
 
             // If the piece is cooling down, draw the draining overlay on top
-            if (auto remaining = restRemainingFraction(*piece, state.arbiter, state.elapsedMs)) {
+            if (auto remaining = restRemainingFraction(activeRest, state.elapsedMs)) {
                 drawRestOverlay(image, boardX, r, c, *remaining);
             }
         }

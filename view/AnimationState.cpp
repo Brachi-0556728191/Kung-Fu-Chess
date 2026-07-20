@@ -26,33 +26,40 @@ const std::map<RestKind, AnimationState> REST_TO_ANIMATION_STATE = {
 };
 
 
-using StateCheck = std::optional<AnimationInfo> (*)(const Piece&, const RealTimeArbiter&);
+using StateCheck = std::optional<AnimationInfo> (*)(const Piece&,
+                                                      const std::optional<PieceMove>&,
+                                                      const std::optional<PieceJump>&,
+                                                      const std::optional<PieceRest>&);
 
-std::optional<AnimationInfo> checkMove(const Piece& piece, const RealTimeArbiter& arbiter) {
-    auto move = arbiter.activeMoveFor(piece.cell);
+std::optional<AnimationInfo> checkMove(const Piece&, const std::optional<PieceMove>& move,
+                                        const std::optional<PieceJump>&, const std::optional<PieceRest>&) {
     if (move) return AnimationInfo{AnimationState::Move, move->startMs};
     return std::nullopt;
 }
 
-std::optional<AnimationInfo> checkJump(const Piece& piece, const RealTimeArbiter& arbiter) {
-    auto jump = arbiter.activeJump();
+std::optional<AnimationInfo> checkJump(const Piece& piece, const std::optional<PieceMove>&,
+                                        const std::optional<PieceJump>& jump, const std::optional<PieceRest>&) {
     if (jump && jump->cell == piece.cell) return AnimationInfo{AnimationState::Jump, jump->startMs};
     return std::nullopt;
 }
 
-std::optional<AnimationInfo> checkRest(const Piece& piece, const RealTimeArbiter& arbiter) {
-    auto rest = arbiter.activeRest(piece.id);
+std::optional<AnimationInfo> checkRest(const Piece&, const std::optional<PieceMove>&,
+                                        const std::optional<PieceJump>&, const std::optional<PieceRest>& rest) {
     if (!rest) return std::nullopt;
     return AnimationInfo{REST_TO_ANIMATION_STATE.at(rest->kind), rest->startMs};
 }
+
 
 const StateCheck STATE_CHECKS[] = {checkMove, checkJump, checkRest};
 
 }  // namespace
 
-AnimationInfo resolveAnimationState(const Piece& piece, const RealTimeArbiter& arbiter) {
+AnimationInfo resolveAnimationState(const Piece& piece,
+                                     const std::optional<PieceMove>& activeMove,
+                                     const std::optional<PieceJump>& activeJump,
+                                     const std::optional<PieceRest>& activeRest) {
     for (StateCheck check : STATE_CHECKS) {
-        if (auto info = check(piece, arbiter)) return *info;
+        if (auto info = check(piece, activeMove, activeJump, activeRest)) return *info;
     }
 
     return {AnimationState::Idle, 0};
@@ -65,14 +72,13 @@ int animationFrameIndex(long elapsedMs, const AnimationInfo& info, const Animati
                           : std::min(frame, ANIMATION_FRAME_COUNT - 1);
 }
 
-std::optional<double> restRemainingFraction(const Piece& piece, const RealTimeArbiter& arbiter, long elapsedMs) {
-    auto rest = arbiter.activeRest(piece.id);
-    if (!rest) return std::nullopt;
+std::optional<double> restRemainingFraction(const std::optional<PieceRest>& activeRest, long elapsedMs) {
+    if (!activeRest) return std::nullopt;
 
-    long totalMs = rest->untilMs - rest->startMs;
+    long totalMs = activeRest->untilMs - activeRest->startMs;
     if (totalMs <= 0) return 0.0;   // degenerate (zero-length) cooldown: already done
 
-    double remaining = double(rest->untilMs - elapsedMs) / double(totalMs);
+    double remaining = double(activeRest->untilMs - elapsedMs) / double(totalMs);
     return std::clamp(remaining, 0.0, 1.0);
 }
 

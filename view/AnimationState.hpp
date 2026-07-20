@@ -4,7 +4,9 @@
 #include <string>
 
 #include "../model/Piece.hpp"
-#include "../realtime/RealTimeArbiter.hpp"
+#include "../model/PieceJump.hpp"
+#include "../model/PieceMove.hpp"
+#include "../model/PieceRest.hpp"
 
 namespace view {
 
@@ -24,12 +26,16 @@ struct AnimationInfo {
     long           stateStartMs;
 };
 
-AnimationInfo resolveAnimationState(const Piece& piece, const RealTimeArbiter& arbiter);
+
+AnimationInfo resolveAnimationState(const Piece& piece,
+                                     const std::optional<PieceMove>& activeMove,
+                                     const std::optional<PieceJump>& activeJump,
+                                     const std::optional<PieceRest>& activeRest);
 
 // 0-based index into the state's 5 sprite frames.
 int animationFrameIndex(long elapsedMs, const AnimationInfo& info, const AnimationTiming& timing);
 
-// cell time of Cooldown 
-std::optional<double> restRemainingFraction(const Piece& piece, const RealTimeArbiter& arbiter, long elapsedMs);
+
+std::optional<double> restRemainingFraction(const std::optional<PieceRest>& activeRest, long elapsedMs);
 
 }  // namespace view
