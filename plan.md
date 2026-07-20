@@ -38,7 +38,7 @@ These were settled after review; they are constraints, not suggestions.
 
 ## Stage checklist
 
-- [ ] **S0 — AnimationState.cpp decoupling refactor** *(local only, no networking)*
+- [x] **S0 — AnimationState.cpp decoupling refactor** *(local only, no networking)*
   Change `resolveAnimationState` and `restRemainingFraction` to accept raw `optional<PieceMove>` / `optional<PieceJump>` / `optional<PieceRest>` directly, instead of `const RealTimeArbiter&`.
   **Done when:** existing test suite passes + visual render check shows local single-player rendering is pixel-identical to before.
 
