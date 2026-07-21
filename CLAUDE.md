@@ -19,10 +19,13 @@ A local, real-time, no-turns chess variant ("Kung Fu Chess" — cooldown-based p
 
 - Build system: CMake (`CMakeLists.txt` at repo root, configured into `build/` for MSVC).
 - Build command: `cmake --build build --config Debug --target chess_tests` (test suite) / `cmake --build build --config Debug --target chess_game` (local game binary). Future `server_main`/`client_main` targets will follow the same pattern once added.
-- Run server: _TODO — doesn't exist yet, arrives at S1/S4._
-- Run client: _TODO — doesn't exist yet, arrives at S1/S4._
-- Package manager: vcpkg, integrated via `vcpkg integrate install`. Libraries used: `ixwebsocket`, `nlohmann-json`. SQLite via amalgamation (`sqlite3.c`/`sqlite3.h`, not vcpkg).
-- Test suite: `./build/Debug/chess_tests.exe` (doctest). Must show 0 failed before any stage is marked done. Baseline as of S0 start: 139 test cases / 438 assertions, all passing.
+- Run server: `./build/Debug/server_echo.exe` (S1's proof-of-pipe only — echoes any received message back, no game logic). Real `server_main` arrives at S4.
+- Run client: `./build/Debug/client_echo.exe` (S1's proof-of-pipe only — connects, sends `"ping"`, prints the reply). Real `client_main` arrives at S4.
+- Package manager: vcpkg, installed at `C:\vcpkg` (cloned from microsoft/vcpkg, bootstrapped via `bootstrap-vcpkg.bat`). `vcpkg integrate install` has been run (applies user-wide MSBuild integration). Installed: `ixwebsocket:x64-windows`, `nlohmann-json:x64-windows`. SQLite via amalgamation (`sqlite3.c`/`sqlite3.h`, not vcpkg — not yet added).
+  - Any new CMake target that needs these libraries must configure with `-DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake`, then `find_package(ixwebsocket CONFIG REQUIRED)` / `find_package(nlohmann_json CONFIG REQUIRED)` and link `ixwebsocket::ixwebsocket` / `nlohmann_json::nlohmann_json`.
+  - **Important environment fact, discovered the hard way during S1:** this machine has *two* separate Visual Studio installations — VS 2022 Community (toolset `14.44.35207`, at `C:\Program Files\Microsoft Visual Studio\2022\Community`, what the project's `build/` directory is configured for) and a separate, newer "Visual Studio 18" BuildTools install (toolset `14.51.36231`). Left to its own detection, vcpkg (when run from a shell without `vcvars64.bat` loaded, e.g. plain Bash) picks the newer one, which produces STL-ABI-incompatible static libs when later linked against the older toolset (symptom: `unresolved external symbol __std_find_first_not_of_trivial_pos_1` or similar STL-internal symbols at link time — not a missing-library problem, a toolset mismatch). Fixed by pinning `VCPKG_VISUAL_STUDIO_PATH` (user env var, set via `setx`, persists machine-wide) to the VS 2022 Community path, then reinstalling any already-built packages so they're rebuilt under the matching toolset. If this class of unresolved-STL-symbol error ever reappears, check this first before assuming a missing dependency.
+  - `build/` was regenerated with `-G "Visual Studio 17 2022" -A x64 -DCMAKE_TOOLCHAIN_FILE=C:/vcpkg/scripts/buildsystems/vcpkg.cmake` once vcpkg packages were actually needed (S1).
+- Test suite: `./build/Debug/chess_tests.exe` (doctest). Must show 0 failed before any stage is marked done. Baseline as of S0 start: 139 test cases / 438 assertions, all passing. Still 139/139 after S1's toolchain changes.
 
 ## Hard rules — don't do these without asking first
 
@@ -35,11 +38,17 @@ A local, real-time, no-turns chess variant ("Kung Fu Chess" — cooldown-based p
 - **No debug `printf`/`cout` left in committed code.** This codebase is graded/tested by an automated grader (VPL-style) elsewhere in the course — treat leftover debug output as a bug, not a convenience. Remove it before considering a stage done.
 - **Don't guess on ambiguity.** If the spec, `PLAN.md`, or existing code leaves something genuinely unclear, ask a short, specific question instead of picking a default and moving on. Wrong assumptions compound across stages.
 
+## Git — commit/push are mine, everything else is fine
+
+I own `git add`, `git commit`, and `git push` exclusively — never run these three, not even a "harmless" checkbox-only commit, not even if I previously approved a commit message format. When a stage is done, just tell me what changed and suggest a commit message in your reply; do not stage, commit, or push anything yourself.
+
+Other git operations (e.g. `git mv`, `git rm`, `git checkout`, `git reset --hard` on a file, etc.) are fine for you to run directly when a stage genuinely calls for them — just tell me what you ran and why in your reply, so I have full visibility.
+
 ## Workflow for finishing a stage
 
 1. Implement the current stage only.
 2. Build clean, run the stage's "Done when" check from `PLAN.md` yourself, and show me the actual output/result — don't just claim it works.
-3. Once I confirm it's good: check the box in `PLAN.md`, and make one commit for the stage: `git commit -m "S<N> done: <short description>"`. One commit per stage, not one giant commit at the end and not several partial commits mid-stage.
+3. Once I confirm it's good: check the box in `PLAN.md` (a file edit, not a git operation — that part's fine). Then tell me what changed and propose a commit message, one stage per commit — but leave staging/committing/pushing to me, per the Git section above.
 4. Stop. Don't continue to the next stage automatically, even if the path forward seems obvious.
 
 ## Code style

@@ -7,6 +7,9 @@ project(chess_game CXX)
 
 find_package(OpenCV REQUIRED)
 
+# ----- S1: WebSocket echo proof-of-pipe -----
+find_package(ixwebsocket CONFIG REQUIRED)
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
@@ -46,6 +49,15 @@ target_compile_definitions(chess_game
     PRIVATE
         CHESS_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
 )
+
+# Standalone WebSocket echo proof (S1) - no dependency on the game code at
+# all, deliberately isolated so a failure here can't be confused with an
+# engine/rules/view problem.
+add_executable(server_echo server_echo.cpp)
+target_link_libraries(server_echo PRIVATE ixwebsocket::ixwebsocket bcrypt)
+
+add_executable(client_echo client_echo.cpp)
+target_link_libraries(client_echo PRIVATE ixwebsocket::ixwebsocket bcrypt)
 
 option(BUILD_TESTS "Build the doctest test suite" ON)
 
