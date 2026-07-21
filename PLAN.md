@@ -46,14 +46,14 @@ These were settled after review; they are constraints, not suggestions.
   `server_echo.cpp` opens `ix::WebSocketServer` on a fixed port, echoes every message back. `client_echo.cpp` connects, sends `"ping"`, prints the reply.
   **Done when:** two terminals, round-trip text message works.
 
-- [ ] **S2 — Message protocol design**
+- [x] **S2 — Message protocol design**
   Write `PROTOCOL.md` + `messages.h` (structs only, no JSON yet).
   - Client→Server: `login`, `play`, `room_join`, `room_create`, `ClickMsg{row,col}`, `JumpMsg{row,col}`
   - Server→Client: `login_ok`/`login_fail`, `match_found`/`no_match_found`, `spectating`, `snapshot`, `opponent_disconnected`, `game_over`
   - `snapshot` fields: board contents, per-piece raw move/rest/jump data, score, `game_over` state, delta `moveHistory` only.
   **Done when:** doc + structs exist and are internally consistent (not yet wired to code).
 
-- [ ] **S3 — JSON serialization over echo**
+- [x] **S3 — JSON serialization over echo**
   Add `to_json`/`from_json` for every struct from S2. Upgrade S1's echo pair to send/receive real structs as JSON instead of `"ping"`.
   **Done when:** round-trip struct → JSON → struct is identical to the original, over the real network.
 
