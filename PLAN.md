@@ -42,7 +42,7 @@ These were settled after review; they are constraints, not suggestions.
   Change `resolveAnimationState` and `restRemainingFraction` to accept raw `optional<PieceMove>` / `optional<PieceJump>` / `optional<PieceRest>` directly, instead of `const RealTimeArbiter&`.
   **Done when:** existing test suite passes + visual render check shows local single-player rendering is pixel-identical to before.
 
-- [ ] **S1 — Basic WebSocket connection (echo)**
+- [x] **S1 — Basic WebSocket connection (echo)**
   `server_echo.cpp` opens `ix::WebSocketServer` on a fixed port, echoes every message back. `client_echo.cpp` connects, sends `"ping"`, prints the reply.
   **Done when:** two terminals, round-trip text message works.
 
