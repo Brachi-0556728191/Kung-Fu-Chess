@@ -35,7 +35,6 @@ add_executable(chess_game
     view/AnimationState.cpp
 
 )
-# target_include_directories(chess_game PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 
 target_include_directories(chess_game
     PRIVATE
@@ -53,9 +52,7 @@ target_compile_definitions(chess_game
         CHESS_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
 )
 
-# Standalone WebSocket echo proof (S1) - no dependency on the game code at
-# all, deliberately isolated so a failure here can't be confused with an
-# engine/rules/view problem.
+
 add_executable(server_echo server_echo.cpp)
 target_include_directories(server_echo PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(server_echo PRIVATE ixwebsocket::ixwebsocket bcrypt nlohmann_json::nlohmann_json)
@@ -63,6 +60,55 @@ target_link_libraries(server_echo PRIVATE ixwebsocket::ixwebsocket bcrypt nlohma
 add_executable(client_echo client_echo.cpp)
 target_include_directories(client_echo PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_link_libraries(client_echo PRIVATE ixwebsocket::ixwebsocket bcrypt nlohmann_json::nlohmann_json)
+
+
+add_executable(server_main
+    server_main.cpp
+    model/Board.cpp
+    model/Piece.cpp
+    model/Position.cpp
+    rules/PieceRules.cpp
+    rules/RuleEngine.cpp
+    realtime/RealTimeArbiter.cpp
+    input/BoardMapper.cpp
+    input/Controller.cpp
+    engine/GameEngine.cpp
+    io/BoardParser.cpp
+)
+target_include_directories(server_main PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+target_link_libraries(server_main PRIVATE ixwebsocket::ixwebsocket bcrypt nlohmann_json::nlohmann_json)
+
+
+add_executable(client_main
+    client_main.cpp
+    model/Board.cpp
+    model/Piece.cpp
+    model/Position.cpp
+    rules/PieceRules.cpp
+    rules/RuleEngine.cpp
+    realtime/RealTimeArbiter.cpp
+    input/BoardMapper.cpp
+    io/BoardParser.cpp
+    view/image_view.cpp
+    view/img.cpp
+    view/AnimationState.cpp
+)
+target_include_directories(client_main
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        ${OpenCV_INCLUDE_DIRS}
+)
+target_link_libraries(client_main
+    PRIVATE
+        ${OpenCV_LIBS}
+        ixwebsocket::ixwebsocket
+        bcrypt
+        nlohmann_json::nlohmann_json
+)
+target_compile_definitions(client_main
+    PRIVATE
+        CHESS_ASSETS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/assets"
+)
 
 option(BUILD_TESTS "Build the doctest test suite" ON)
 
@@ -90,7 +136,6 @@ if(BUILD_TESTS)
         io/BoardPrinter.cpp
         
     )
-    # target_include_directories(chess_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR} third_party)
     target_include_directories(chess_tests
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}

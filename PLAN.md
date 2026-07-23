@@ -64,6 +64,42 @@ These were settled after review; they are constraints, not suggestions.
   - Snapshot broadcast built under the per-instance mutex using S0-refactored functions.
   - Color assignment: first-connect = white, second = black (global variable for now).
   **Done when:** 2 client windows open, clicking a piece in one moves it in both, full rule logic (legality, cooldown, capture) works over the network.
+  ⚠️ **Known gap, found during S4 checkpoint 4, not fixed — needs a decision before S4 is marked done.** `GameState.selection` is a single global field with no player-identity concept (built for local hotseat, one mouse at a time). The server-side ownership gate added in checkpoint 3 (`isClickAllowed`) can therefore only ask "does the *currently active* selection belong to this connection" — while any selection is active, every other connection's clicks are rejected outright, not just clicks touching the selected piece. This is distinct from ownership gating (which is working as intended and already approved) — this is a structural side effect of the single-selection model reintroducing a turn-like blocking window into a project whose stated premise is "no-turns." Confirmed via code audit: nothing ever clears a `Selection` on a timer (`selectedAtMs` is written, never read) — the only clears are `sendMove`'s unconditional `sel.clear()`, `Controller::click`'s off-board-click branch, and `handleWait`'s game-over path — so an abandoned selection (dropped connection, distracted player) blocks the other connection **indefinitely**, not just briefly. A full fix (per-connection/per-color selection instead of one shared field) touches `Controller.cpp`, `model/GameState.hpp`, and `view/image_view.cpp` — all outside S4's file set and `Controller.cpp` specifically protected by a hard rule. Not implemented pending an explicit decision. **Resolution: scoped as its own stage, S4.5, below** — not folded into S4 as a late patch, not deferred to S7/S8 (neither touches `Selection` at all, so waiting on them would teach us nothing new).
+
+- [x] **S4.5 — Per-connection Selection (remove the turn-like block)**
+  Fixes the gap above. Depends on S4 (needs the connection/color/mutex machinery already in place); inserted before S5 rather than deferred, since S5+ all build further on this same `GameState` model and the fix only gets more invasive to retrofit the longer it waits.
+
+  **Design (approved and implemented; re-run checkpoint 4 tests confirmed, approved in full):**
+
+  - **Shape of the fix — two named fields, not a map.** Add a new bundle to `model/GameState.hpp`, *alongside* (not replacing) the existing `Selection selection` field:
+    ```cpp
+    struct SelectionState {
+        Selection white;
+        Selection black;
+        Selection&       forColor(Color c)       { return c == Color::White ? white : black; }
+        const Selection& forColor(Color c) const { return c == Color::White ? white : black; }
+    };
+    ```
+    `GameState` gains `SelectionState selections;`. Two named fields plus a `Color`-keyed accessor matches this codebase's existing per-color convention exactly (`Score::white`/`Score::black` with `Score::add(Color, int)`) rather than introducing a `std::map<Color, Selection>` pattern used nowhere else in the model layer, for a set that's always exactly 2. *Considered and rejected:* tagging the existing single `Selection` with an `owner` field — that only labels whose the one blocking slot is; it doesn't let both colors hold an active selection at once, so it doesn't actually fix the problem, just documents it.
+
+  - **`Controller.cpp` / `GameEngine.cpp`'s `sendMove`: zero changes.** `Controller::click`'s signature is protected and can't grow a `Color` parameter to know which slot to consult. So instead of teaching Controller.cpp about colors, the existing `GameState.selection` field is repurposed as a transient scratch slot, and new glue in `server_main.cpp` (not a protected file) swaps the right color's real slot into it immediately around the call, inside the same `instance.mutex` lock that already wraps `Controller::click`:
+    ```cpp
+    Selection& mine = instance.state.selections.forColor(color);
+    std::swap(instance.state.selection, mine);   // load this connection's selection in
+    Controller::click(instance.state, x, y);      // completely unchanged - reads/writes state.selection exactly as today
+    std::swap(instance.state.selection, mine);   // save it back out
+    ```
+    `Controller::click`/`sendMove` never know this is happening — they keep reading and writing `st.selection` exactly as they do today; not one line changes. Whatever's left sitting in `state.selection` between calls is inert leftover from the previous swap and is always fully overwritten before the next read, so it's harmless. `Controller::jump`/`startJump` need no change at all — neither ever touches `Selection`. *(Ruled out, not just deprioritized: giving `Controller::click` a `Color` parameter directly — that's a signature change, which the hard rule forbids outright, not merely "needs sign-off.")*
+
+  - **`chess_game` / local hotseat mode: zero changes.** Hotseat has no connection identity to key a slot by, and needs none — only the new server-side glue does the swap dance. `main.cpp` keeps calling `Controller::click(state, x, y)` directly, so `state.selection` keeps behaving for hotseat exactly as it does today: one persistent field, one mouse, used directly. `state.selections` simply sits unused on that code path.
+
+  - **`isClickAllowed`/`isJumpAllowed` (`server_main.cpp`): read `state.selections.forColor(connectionColor)` instead of the single `state.selection`.** This one line of reasoning *is* the actual fix — a connection's click is now gated only by *that connection's own* pending selection, never by the other color's.
+
+  - **`view/image_view.cpp`: zero changes, deliberately — the opponent's in-progress selection is not rendered.** Two reasons: (1) the client's local `Selection` is already purely cosmetic and never fed by the server (snapshots deliberately omit selection state, an S4-checkpoint-3 decision) — showing the opponent's pending pick would mean extending `SnapshotMsg` and touching `messages.h`/`messages_json.h` (more checked-off files) for a UX addition this stage doesn't need to fix the actual bug; (2) revealing which piece the opponent is mid-deciding-about is arguably an unwanted "tell" in a real-time variant, not an obviously-wanted feature. Since neither actual caller of `renderBoard` (`chess_game`, `client_main`) is touched by this stage, no rendering code needs to change at all.
+
+  - **Interaction with S10's disconnect timer:** a `selectedAtMs`-based timeout mitigation was considered as a stopgap while this stage was still just a design proposal, but was never actually implemented in `server_main.cpp` — this stage fixes the root cause directly instead, so that stopgap is superseded before it ever existed and there's nothing to remove. The only real timeout mechanism relevant here is S10's 15s disconnect timer, and it doesn't interact with this stage at all: it triggers on the *connection closing* and ends the whole game outright, independent of whatever either color's `Selection` slot holds at the time.
+
+  **Done when:** Re-run checkpoint 4's Test 4 — White selects a piece (pending, not completed); while that selection is active, Black clicks one of Black's own pieces. This time Black's click must succeed normally (Black's own selection opens, legal-move preview shows for Black's piece), not be dropped — the fix must prove "doesn't block Black at all," not just "doesn't hijack White's selection." Checkpoint 4's other four tests (ownership gating, legal move, cooldown, capture) must still pass unchanged — this stage must not reopen cross-color piece control.
 
 - [ ] **S5 — Login + SQLite**
   `users(username TEXT PRIMARY KEY, password_hash TEXT, elo INTEGER DEFAULT 1000)`. Password always hashed, never plaintext. `LoginMsg` → `login_ok{elo}` / `login_fail{reason}`.
@@ -85,6 +121,12 @@ These were settled after review; they are constraints, not suggestions.
 - [ ] **S9 — Multiple concurrent games (registry)**
   `unordered_map<room_id, unique_ptr<GameInstance>>`, each instance with its own mutex (already designed this way since S4 — no retrofit).
   **Done when:** 4 clients, 2 independent concurrent games (or Play+Room simultaneously), no cross-interference.
+  ⚠️ **Tracked refactor, found during S4.5, not implemented — do at this stage.** `server_main.cpp` has grown to mix several distinct responsibilities in one file: connection/color-slot tracking (`ConnectionInfo`, `connections`, `nextColorSlot`), ownership gating (`isClickAllowed`/`isJumpAllowed` + the selection swap-in/out), snapshot construction (`buildBaseSnapshot` plus per-connection delta assembly), and pixel/cell coordinate conversion (`canonicalX`/`canonicalY`) — alongside `main()`'s orchestration and the tick/broadcast loops. Not a mistake — the natural result of adding glue incrementally stage by stage — and still manageable at its current size, but S7 (`MatchmakingPool`), S8 (`RoomManager`), and this stage (one `GameInstance` becoming a registry of them) are all about to add more state and logic to the same file, and left alone it becomes a real maintainability problem. Tied to S9 specifically because "one `GameInstance`" becoming "a registry of them" is the natural seam to split along anyway. Intended split (sketch only, not implemented):
+  - `ConnectionRegistry` — wraps `connections`/`connectionsMutex`/`nextColorSlot` behind a small interface.
+  - `OwnershipGate` — `isClickAllowed`/`isJumpAllowed` and the selection swap-in/out.
+  - `SnapshotBuilder` — `buildBaseSnapshot` plus per-connection delta assembly.
+  - A small pixel/cell mapping helper — `canonicalX`/`canonicalY`.
+  - `server_main.cpp` itself reduced to orchestration only: wiring these pieces together and running the tick/broadcast loops.
 
 - [ ] **S10 — Disconnect handling**
   On `on_close`, find the owning `GameInstance`, start a 15s timer (tunable), notify opponent via `opponent_disconnected{seconds_left}`. On timeout: `game_over{winner}`, update ELO (S6), remove instance from registry.
@@ -109,6 +151,7 @@ These were settled after review; they are constraints, not suggestions.
 | S2 | Protocol design | S1 |
 | S3 | JSON serialization | S1, S2 |
 | S4 | Real engine wiring, concurrency, snapshot generation | S0, S1–S3 |
+| S4.5 | Per-connection Selection (remove turn-like block) | S4 |
 | S5 | Login + SQLite (ELO default 1000) | S4 |
 | S6 | ELO calculation | S4, S5 |
 | S7 | Matchmaking (±200, ~30s) | S6 |
